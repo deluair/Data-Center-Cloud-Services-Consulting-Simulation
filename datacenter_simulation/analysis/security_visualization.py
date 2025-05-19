@@ -15,7 +15,7 @@ class SecurityVisualizer:
     """Visualization tools for security analysis"""
     
     def __init__(self):
-        plt.style.use('seaborn')
+        plt.style.use('default')
         sns.set_palette("husl")
         
     def plot_threat_evolution(self,
@@ -26,7 +26,7 @@ class SecurityVisualizer:
         Create interactive plot of threat evolution
         
         Args:
-            threats: DataFrame with security threat data
+            threats: DataFrame with security threat data (long format)
             regions: List of regions to plot
             title: Plot title
             
@@ -37,22 +37,25 @@ class SecurityVisualizer:
                           subplot_titles=('Attack Frequency', 'Threat Severity'))
         
         for region in regions:
-            # Attack frequency plot
+            region_data = threats[threats['region'] == region]
+            # Attack frequency (rolling mean for smoothing)
+            attack_freq = region_data['attack_occurred'].rolling(window=7, min_periods=1).mean()
             fig.add_trace(
                 go.Scatter(
-                    x=threats.index,
-                    y=threats[f'{region}_attacks'],
+                    x=region_data['timestamp'],
+                    y=attack_freq,
                     name=f'{region} Attacks',
                     mode='lines'
                 ),
                 row=1, col=1
             )
             
-            # Threat severity plot
+            # Threat severity (rolling mean for smoothing)
+            severity = region_data['attack_severity'].rolling(window=7, min_periods=1).mean()
             fig.add_trace(
                 go.Scatter(
-                    x=threats.index,
-                    y=threats[f'{region}_severity'],
+                    x=region_data['timestamp'],
+                    y=severity,
                     name=f'{region} Severity',
                     mode='lines'
                 ),
@@ -87,8 +90,8 @@ class SecurityVisualizer:
         for region in regions:
             metric_data.append({
                 'Region': region,
-                'Detection Rate': metrics[region]['detection_rate'],
-                'Response Rate': metrics[region]['response_rate'],
+                'Detection Effectiveness': metrics[region]['detection_effectiveness'],
+                'Response Effectiveness': metrics[region]['response_effectiveness'],
                 'Threat Mitigation': metrics[region]['threat_mitigation'],
                 'Security Score': metrics[region]['security_score'],
                 'Risk Level': metrics[region]['risk_level']
@@ -102,9 +105,9 @@ class SecurityVisualizer:
         for region in regions:
             fig.add_trace(go.Scatterpolar(
                 r=[df.loc[df['Region'] == region, col].values[0] for col in 
-                   ['Detection Rate', 'Response Rate', 'Threat Mitigation', 
+                   ['Detection Effectiveness', 'Response Effectiveness', 'Threat Mitigation', 
                     'Security Score', 'Risk Level']],
-                theta=['Detection Rate', 'Response Rate', 'Threat Mitigation', 
+                theta=['Detection Effectiveness', 'Response Effectiveness', 'Threat Mitigation', 
                       'Security Score', 'Risk Level'],
                 name=region,
                 fill='toself'
@@ -163,16 +166,12 @@ class SecurityVisualizer:
         
         return fig
     
-    def plot_security_strategies(self,
-                               strategies: Dict[str, List[str]],
-                               title: str = "Recommended Security Strategies") -> go.Figure:
+    def plot_security_strategies(self, strategies: Dict[str, List[str]], title: str = "Recommended Security Strategies") -> go.Figure:
         """
-        Create visualization of recommended strategies
-        
+        Create visualization of recommended security strategies
         Args:
-            strategies: Dictionary of recommended strategies
+            strategies: Dictionary of recommended strategies by region
             title: Plot title
-            
         Returns:
             Plotly figure object
         """
@@ -184,22 +183,24 @@ class SecurityVisualizer:
                     'Region': region,
                     'Strategy': strategy
                 })
-        
         df = pd.DataFrame(strategy_data)
-        
+        if df.empty:
+            # No strategies to show
+            fig = go.Figure()
+            fig.update_layout(title=title)
+            return fig
         # Create heatmap of strategy presence
         strategy_matrix = pd.crosstab(df['Region'], df['Strategy'])
-        
         fig = px.imshow(strategy_matrix,
-                       title=title,
-                       labels=dict(x="Strategy", y="Region", color="Present"),
-                       aspect="auto")
-        
+                        title=title,
+                        labels=dict(x="Strategy", y="Region", color="Present"),
+                        aspect="auto")
         fig.update_layout(
             xaxis_title='Strategy',
-            yaxis_title='Region'
+            yaxis_title='Region',
+            height=400,
+            margin=dict(l=50, r=50, t=50, b=50)
         )
-        
         return fig
     
     def create_security_dashboard(self,
@@ -211,7 +212,6 @@ class SecurityVisualizer:
                                 title: str = "Security Analysis Dashboard") -> go.Figure:
         """
         Create comprehensive security dashboard
-        
         Args:
             threats: DataFrame with security threat data
             metrics: Dictionary with security metrics
@@ -219,7 +219,6 @@ class SecurityVisualizer:
             strategies: Dictionary of recommended strategies
             regions: List of regions analyzed
             title: Dashboard title
-            
         Returns:
             Plotly figure object
         """
@@ -232,34 +231,33 @@ class SecurityVisualizer:
                 "Strategy Distribution", "Security Score"
             )
         )
-        
-        # Add threat evolution plot
+
+        # Add threat evolution plot (severity)
         for region in regions:
+            region_data = threats[threats['region'] == region]
+            severity = region_data['attack_severity'].rolling(window=7, min_periods=1).mean()
             fig.add_trace(
                 go.Scatter(
-                    x=threats.index,
-                    y=threats[f'{region}_severity'],
+                    x=region_data['timestamp'],
+                    y=severity,
                     name=f'{region} Severity',
                     mode='lines'
                 ),
                 row=1, col=1
             )
-        
-        # Add security metrics radar chart
-        for region in regions:
+
+        # Add security metrics as grouped bar chart
+        metric_names = ['detection_effectiveness', 'response_effectiveness', 'threat_mitigation', 'security_score']
+        for metric_name in metric_names:
             fig.add_trace(
-                go.Scatterpolar(
-                    r=[metrics[region]['detection_rate'],
-                       metrics[region]['response_rate'],
-                       metrics[region]['threat_mitigation'],
-                       metrics[region]['security_score']],
-                    theta=['Detection', 'Response', 'Mitigation', 'Score'],
-                    name=region,
-                    fill='toself'
+                go.Bar(
+                    x=regions,
+                    y=[metrics[region][metric_name] for region in regions],
+                    name=metric_name.replace('_', ' ').title()
                 ),
                 row=1, col=2
             )
-        
+
         # Add cost breakdown
         cost_types = ['detection_cost', 'response_cost', 'monitoring_cost',
                      'training_cost', 'incident_cost']
@@ -272,7 +270,7 @@ class SecurityVisualizer:
                 ),
                 row=2, col=1
             )
-        
+
         # Add risk analysis
         for region in regions:
             fig.add_trace(
@@ -283,7 +281,7 @@ class SecurityVisualizer:
                 ),
                 row=2, col=2
             )
-        
+
         # Add strategy distribution
         strategy_counts = {region: len(strategies[region]) for region in regions}
         fig.add_trace(
@@ -294,7 +292,7 @@ class SecurityVisualizer:
             ),
             row=3, col=1
         )
-        
+
         # Add security score
         for region in regions:
             fig.add_trace(
@@ -305,13 +303,14 @@ class SecurityVisualizer:
                 ),
                 row=3, col=2
             )
-        
+
         fig.update_layout(
             title=title,
             height=1200,
-            showlegend=True
+            showlegend=True,
+            barmode='group'
         )
-        
+
         return fig
     
     def save_security_analysis(self,
@@ -342,7 +341,7 @@ class SecurityVisualizer:
         )
         
         # Combine all figures into a single HTML file
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write('<html><head><title>Security Analysis</title></head><body>')
             
             # Add each figure
